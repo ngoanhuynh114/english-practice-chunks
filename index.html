@@ -638,18 +638,28 @@
 
         // ============================================================
         // TEXT-TO-SPEECH
-        // Tiếng Việt  → Google TTS (không cần cài voice hệ thống)
-        // Tiếng Anh   → Web Speech API
+        // Ưu tiên: Web Speech API (nếu có voice vi-VN trên máy)
+        // Fallback: ResponsiveVoice (CDN, không cần API key)
         // ============================================================
         const synth = window.speechSynthesis;
         let voices = [];
-        let currentAudio = null; // Audio đang phát (Google TTS)
+        let rvReady = false; // ResponsiveVoice đã load chưa
 
         function loadVoices() { voices = synth.getVoices(); }
         loadVoices();
         if (synth.onvoiceschanged !== undefined) {
             synth.onvoiceschanged = loadVoices;
         }
+
+        // Load ResponsiveVoice script một lần duy nhất
+        (function loadRV() {
+            if (document.getElementById('rv-script')) return;
+            const s = document.createElement('script');
+            s.id = 'rv-script';
+            s.src = 'https://code.responsivevoice.org/responsivevoice.js?key=FREE';
+            s.onload = () => { rvReady = true; };
+            document.head.appendChild(s);
+        })();
 
         function getVoice(lang) {
             if (voices.length === 0) voices = synth.getVoices();
@@ -659,47 +669,45 @@
                 || null;
         }
 
-        // Dừng mọi thứ đang phát (cả Google TTS lẫn Web Speech)
+        function hasViVoice() {
+            if (voices.length === 0) voices = synth.getVoices();
+            return voices.some(v => v.lang === 'vi-VN' || v.lang.startsWith('vi'));
+        }
+
         function stopAll() {
-            if (currentAudio) {
-                currentAudio.pause();
-                currentAudio.src = '';
-                currentAudio = null;
-            }
             if (synth.speaking) synth.cancel();
+            if (window.responsiveVoice && rvReady) {
+                try { responsiveVoice.cancel(); } catch(e) {}
+            }
             document.querySelectorAll('.speaker-btn.speaking')
                 .forEach(b => b.classList.remove('speaking'));
         }
 
-        // Đọc tiếng Việt qua Google Translate TTS
-        function speakViaTTS(text, btnEl) {
-            stopAll();
-            const encoded = encodeURIComponent(text);
-            const url = `https://translate.googleapis.com/translate_tts?ie=UTF-8&q=${encoded}&tl=vi&client=gtx&ttsspeed=0.9`;
-            const audio = new Audio(url);
-            currentAudio = audio;
-            if (btnEl) {
-                btnEl.classList.add('speaking');
-                audio.onended  = () => { btnEl.classList.remove('speaking'); currentAudio = null; };
-                audio.onerror  = () => { btnEl.classList.remove('speaking'); currentAudio = null; };
+        // Đọc bằng ResponsiveVoice (fallback khi không có voice vi-VN)
+        function speakViaRV(text, btnEl) {
+            if (!rvReady || !window.responsiveVoice) {
+                // RV chưa load xong, thử lại sau 300ms
+                setTimeout(() => speakViaRV(text, btnEl), 300);
+                return;
             }
-            audio.play().catch(() => {
-                if (btnEl) btnEl.classList.remove('speaking');
-                currentAudio = null;
+            if (btnEl) btnEl.classList.add('speaking');
+            responsiveVoice.speak(text, 'Vietnamese Female', {
+                rate: 0.9,
+                onend:   () => { if (btnEl) btnEl.classList.remove('speaking'); },
+                onerror: () => { if (btnEl) btnEl.classList.remove('speaking'); }
             });
         }
 
-        // Đọc tiếng Anh qua Web Speech API
-        function speakViaWebSpeech(text, btnEl) {
-            stopAll();
+        // Đọc bằng Web Speech API
+        function speakViaWebSpeech(text, lang, btnEl) {
             if (!text || !text.trim()) return;
             function doSpeak() {
                 const utter = new SpeechSynthesisUtterance(text);
-                utter.lang  = 'en-US';
-                utter.rate  = 0.9;
-                utter.pitch = 1;
+                utter.lang   = lang;
+                utter.rate   = lang.startsWith('vi') ? 0.9 : 0.9;
+                utter.pitch  = 1;
                 utter.volume = 1;
-                const voice = getVoice('en-US');
+                const voice = getVoice(lang);
                 if (voice) utter.voice = voice;
                 if (btnEl) {
                     btnEl.classList.add('speaking');
@@ -720,17 +728,22 @@
         }
 
         /**
-         * Hàm speak() chính — tự chọn engine phù hợp theo ngôn ngữ
+         * Hàm speak() chính
          * @param {string} text
          * @param {string} lang  - 'vi-VN' hoặc 'en-US'
          * @param {HTMLElement} btnEl
          */
         function speak(text, lang = 'en-US', btnEl = null) {
             if (!text || !text.trim()) return;
+            stopAll();
             if (lang.startsWith('vi')) {
-                speakViaTTS(text, btnEl);
+                if (hasViVoice()) {
+                    speakViaWebSpeech(text, lang, btnEl); // Máy có voice vi-VN → dùng luôn
+                } else {
+                    speakViaRV(text, btnEl);              // Không có → dùng ResponsiveVoice
+                }
             } else {
-                speakViaWebSpeech(text, btnEl);
+                speakViaWebSpeech(text, lang, btnEl);
             }
         }
 
