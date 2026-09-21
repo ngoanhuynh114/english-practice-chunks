@@ -637,94 +637,37 @@
         let timeLeft = 0;
 
         // ============================================================
-        // TEXT-TO-SPEECH
-        // Ưu tiên: Web Speech API (nếu có voice vi-VN trên máy)
-        // Fallback: ResponsiveVoice (CDN, không cần API key)
+        // TEXT-TO-SPEECH — Web Speech API
+        // Dùng Promise để đảm bảo voices luôn load xong trước khi đọc
         // ============================================================
         const synth = window.speechSynthesis;
-        let voices = [];
-        let rvReady = false; // ResponsiveVoice đã load chưa
 
-        function loadVoices() { voices = synth.getVoices(); }
-        loadVoices();
-        if (synth.onvoiceschanged !== undefined) {
-            synth.onvoiceschanged = loadVoices;
-        }
-
-        // Load ResponsiveVoice script một lần duy nhất
-        (function loadRV() {
-            if (document.getElementById('rv-script')) return;
-            const s = document.createElement('script');
-            s.id = 'rv-script';
-            s.src = 'https://code.responsivevoice.org/responsivevoice.js?key=FREE';
-            s.onload = () => { rvReady = true; };
-            document.head.appendChild(s);
-        })();
-
-        function getVoice(lang) {
-            if (voices.length === 0) voices = synth.getVoices();
-            const prefix = lang.split('-')[0];
-            return voices.find(v => v.lang === lang)
-                || voices.find(v => v.lang.startsWith(prefix))
-                || null;
-        }
-
-        function hasViVoice() {
-            if (voices.length === 0) voices = synth.getVoices();
-            return voices.some(v => v.lang === 'vi-VN' || v.lang.startsWith('vi'));
+        // Trả về Promise<SpeechSynthesisVoice[]> — resolve ngay nếu đã có, chờ nếu chưa
+        function getVoicesReady() {
+            return new Promise(resolve => {
+                let list = synth.getVoices();
+                if (list.length > 0) { resolve(list); return; }
+                // Chưa có → chờ sự kiện onvoiceschanged
+                synth.addEventListener('voiceschanged', function handler() {
+                    synth.removeEventListener('voiceschanged', handler);
+                    resolve(synth.getVoices());
+                });
+                // Timeout 3s phòng trình duyệt không bắn sự kiện
+                setTimeout(() => resolve(synth.getVoices()), 3000);
+            });
         }
 
         function stopAll() {
             if (synth.speaking) synth.cancel();
-            if (window.responsiveVoice && rvReady) {
-                try { responsiveVoice.cancel(); } catch(e) {}
-            }
             document.querySelectorAll('.speaker-btn.speaking')
                 .forEach(b => b.classList.remove('speaking'));
         }
 
-        // Đọc bằng ResponsiveVoice (fallback khi không có voice vi-VN)
-        function speakViaRV(text, btnEl) {
-            if (!rvReady || !window.responsiveVoice) {
-                // RV chưa load xong, thử lại sau 300ms
-                setTimeout(() => speakViaRV(text, btnEl), 300);
-                return;
-            }
-            if (btnEl) btnEl.classList.add('speaking');
-            responsiveVoice.speak(text, 'Vietnamese Female', {
-                rate: 0.9,
-                onend:   () => { if (btnEl) btnEl.classList.remove('speaking'); },
-                onerror: () => { if (btnEl) btnEl.classList.remove('speaking'); }
-            });
-        }
-
-        // Đọc bằng Web Speech API
-        function speakViaWebSpeech(text, lang, btnEl) {
-            if (!text || !text.trim()) return;
-            function doSpeak() {
-                const utter = new SpeechSynthesisUtterance(text);
-                utter.lang   = lang;
-                utter.rate   = lang.startsWith('vi') ? 0.9 : 0.9;
-                utter.pitch  = 1;
-                utter.volume = 1;
-                const voice = getVoice(lang);
-                if (voice) utter.voice = voice;
-                if (btnEl) {
-                    btnEl.classList.add('speaking');
-                    utter.onend  = () => btnEl.classList.remove('speaking');
-                    utter.onerror = () => btnEl.classList.remove('speaking');
-                }
-                synth.speak(utter);
-            }
-            if (voices.length === 0) {
-                const t = setInterval(() => {
-                    voices = synth.getVoices();
-                    if (voices.length > 0) { clearInterval(t); doSpeak(); }
-                }, 50);
-                setTimeout(() => clearInterval(t), 500);
-            } else {
-                doSpeak();
-            }
+        function findVoice(voices, lang) {
+            const prefix = lang.split('-')[0];
+            return voices.find(v => v.lang === lang)
+                || voices.find(v => v.lang.startsWith(prefix))
+                || null;
         }
 
         /**
@@ -736,15 +679,21 @@
         function speak(text, lang = 'en-US', btnEl = null) {
             if (!text || !text.trim()) return;
             stopAll();
-            if (lang.startsWith('vi')) {
-                if (hasViVoice()) {
-                    speakViaWebSpeech(text, lang, btnEl); // Máy có voice vi-VN → dùng luôn
-                } else {
-                    speakViaRV(text, btnEl);              // Không có → dùng ResponsiveVoice
+            getVoicesReady().then(voices => {
+                const utter = new SpeechSynthesisUtterance(text);
+                utter.lang   = lang;
+                utter.rate   = 0.9;
+                utter.pitch  = 1;
+                utter.volume = 1;
+                const voice = findVoice(voices, lang);
+                if (voice) utter.voice = voice;
+                if (btnEl) {
+                    btnEl.classList.add('speaking');
+                    utter.onend  = () => btnEl.classList.remove('speaking');
+                    utter.onerror = () => btnEl.classList.remove('speaking');
                 }
-            } else {
-                speakViaWebSpeech(text, lang, btnEl);
-            }
+                synth.speak(utter);
+            });
         }
 
         function speakChunk(event) {
