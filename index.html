@@ -664,24 +664,66 @@
          * @param {string} lang - 'vi-VN' hoặc 'en-US'
          * @param {HTMLElement} btnEl - Button để hiệu ứng "speaking"
          */
+        // Biến toàn cục cho audio Google TTS
+        let currentAudio = null;
+
+        /**
+        * Đọc text — tiếng Việt dùng Google Translate TTS, tiếng Anh dùng Web Speech API
+        */
         function speak(text, lang = 'en-US', btnEl = null) {
-            if (!synth) {
-                alert('Trình duyệt của bạn không hỗ trợ đọc văn bản.');
+            if (!text || !text.trim()) return;
+
+            // Dừng audio cũ
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio = null;
+            }
+            if (synth && synth.speaking) {
+                synth.cancel();
+            }
+            document.querySelectorAll('.speaker-btn.speaking')
+                .forEach(b => b.classList.remove('speaking'));
+
+            if (btnEl) btnEl.classList.add('speaking');
+
+            // ===== TIẾNG VIỆT → Google Translate TTS =====
+            if (lang.startsWith('vi')) {
+                const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=vi&client=tw-ob`;
+                
+                currentAudio = new Audio(url);
+                currentAudio.onended = () => {
+                    if (btnEl) btnEl.classList.remove('speaking');
+                    currentAudio = null;
+                };
+                currentAudio.onerror = () => {
+                    console.error('❌ Google TTS failed, fallback to Web Speech');
+                    if (btnEl) btnEl.classList.remove('speaking');
+                    // Fallback: thử dùng Web Speech (sẽ đọc bằng giọng Anh)
+                    speakWithWebSpeech(text, 'vi-VN', btnEl);
+                };
+                currentAudio.play().catch(err => {
+                    console.error('❌ Audio play failed:', err);
+                    if (btnEl) btnEl.classList.remove('speaking');
+                });
                 return;
             }
 
-            // Nếu đang đọc → dừng
-            if (synth.speaking) {
-                synth.cancel();
-                document.querySelectorAll('.speaker-btn.speaking')
-                    .forEach(b => b.classList.remove('speaking'));
-            }
+            // ===== TIẾNG ANH → Web Speech API =====
+            speakWithWebSpeech(text, lang, btnEl);
+        }
 
-            if (!text || !text.trim()) return;
+        /**
+        * Hàm cũ dùng Web Speech API (giữ nguyên cho tiếng Anh)
+        */
+        function speakWithWebSpeech(text, lang, btnEl) {
+            if (!synth) {
+                if (btnEl) btnEl.classList.remove('speaking');
+                return;
+            }
 
             const utter = new SpeechSynthesisUtterance(text);
             utter.lang = lang;
-            utter.rate = lang.startsWith('vi') ? 0.95 : 0.9;
+            utter.rate = 0.9;
             utter.pitch = 1;
             utter.volume = 1;
 
@@ -689,10 +731,14 @@
             if (voice) utter.voice = voice;
 
             if (btnEl) {
-                btnEl.classList.add('speaking');
                 utter.onend = () => btnEl.classList.remove('speaking');
                 utter.onerror = () => btnEl.classList.remove('speaking');
             }
+
+            utter.onerror = (e) => {
+                console.error('❌ Speech error:', e.error, '| Lang:', lang);
+                if (btnEl) btnEl.classList.remove('speaking');
+            };
 
             synth.speak(utter);
         }
