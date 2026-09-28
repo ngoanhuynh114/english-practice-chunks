@@ -167,7 +167,6 @@
 
         .vn-text { color: #333; font-size: 18px; line-height: 1.5; }
 
-        /* 🔊 Speaker button */
         .speaker-btn {
             background: white;
             border: 2px solid currentColor;
@@ -274,7 +273,6 @@
             50% { transform: scale(1.05); }
         }
 
-        /* ===== SUMMARY ===== */
         .summary-item {
             background: #f9f9f9;
             border-radius: 10px;
@@ -312,7 +310,6 @@
             line-height: 1.6;
         }
 
-        /* Highlight lỗi */
         .word-wrong {
             background: #ffcdd2;
             color: #b71c1c;
@@ -354,7 +351,6 @@
         .badge-wrong { background: #f44336; color: white; }
         .badge-skip { background: #9e9e9e; color: white; }
 
-        /* Toggle switch */
         .switch {
             position: relative;
             display: inline-block;
@@ -482,7 +478,6 @@
         .stat-box.red { background: #ffebee; }
         .stat-box.red .num { color: #c62828; }
 
-        /* Legend */
         .legend {
             display: flex;
             gap: 15px;
@@ -539,6 +534,15 @@
         const TIMED_DECREMENT = 10;
         const MIN_TIME = 10;
         const CACHE_DURATION_MS = 5 * 60 * 1000;
+
+        // ═══════════════════════════════════════════════
+        // 🤖 AI GRADING CONFIG — DÁN API KEY VÀO ĐÂY
+        // ═══════════════════════════════════════════════
+        const GEMINI_API_KEY = '';   // ← thay bằng AIzaSy...
+        const GEMINI_MODEL = 'gemini-3.5-flash';
+        const GEMINI_ENDPOINT = `https://jolly-breeze-e4f5.ngoanhuynh114.workers.dev/`;
+        const USE_AI_GRADING = true;      // false → dùng chấm cục bộ
+        const AI_TIMEOUT_MS = 90000;      // 90s
     </script>
 
     <div class="top-bar">
@@ -594,7 +598,7 @@
             <div class="chunk-box">
                 <div class="chunk-label">
                     <span>💡 Mẫu câu (Chunk)</span>
-                    <button class="speaker-btn" onclick="speakChunk()" title="Đọc mẫu câu">🔊</button>
+                    <button class="speaker-btn" onclick="speakChunk(event)" title="Đọc mẫu câu">🔊</button>
                 </div>
                 <div class="chunk-text" id="chunkText"></div>
             </div>
@@ -602,7 +606,7 @@
             <div class="vn-box">
                 <div class="vn-label">
                     <span>🇻🇳 Câu tiếng Việt</span>
-                    <button class="speaker-btn" onclick="speakVietnamese()" title="Đọc câu tiếng Việt">🔊</button>
+                    <button class="speaker-btn" onclick="speakVietnamese(event)" title="Đọc câu tiếng Việt">🔊</button>
                 </div>
                 <div class="vn-text" id="vnText"></div>
             </div>
@@ -618,7 +622,7 @@
         <div class="screen" id="screen-summary">
             <div class="summary-header">
                 <h1>🎉 Hoàn thành!</h1>
-                <div class="score" id="scoreDisplay">0 / 10</div>
+                <div class="score" id="scoreDisplay">⏳ Đang chấm...</div>
             </div>
 
             <div class="summary-stats" id="summaryStats"></div>
@@ -656,24 +660,21 @@
         let mode = 'free';
         let timerInterval = null;
         let timeLeft = 0;
+        let isGrading = false;
 
         // ============================================================
-        // TEXT-TO-SPEECH — Web Speech API
-        // Dùng Promise để đảm bảo voices luôn load xong trước khi đọc
+        // TEXT-TO-SPEECH
         // ============================================================
         const synth = window.speechSynthesis;
 
-        // Trả về Promise<SpeechSynthesisVoice[]> — resolve ngay nếu đã có, chờ nếu chưa
         function getVoicesReady() {
             return new Promise(resolve => {
                 let list = synth.getVoices();
                 if (list.length > 0) { resolve(list); return; }
-                // Chưa có → chờ sự kiện onvoiceschanged
                 synth.addEventListener('voiceschanged', function handler() {
                     synth.removeEventListener('voiceschanged', handler);
                     resolve(synth.getVoices());
                 });
-                // Timeout 3s phòng trình duyệt không bắn sự kiện
                 setTimeout(() => resolve(synth.getVoices()), 3000);
             });
         }
@@ -691,12 +692,6 @@
                 || null;
         }
 
-        /**
-         * Hàm speak() chính
-         * @param {string} text
-         * @param {string} lang  - 'vi-VN' hoặc 'en-US'
-         * @param {HTMLElement} btnEl
-         */
         function speak(text, lang = 'en-US', btnEl = null) {
             if (!text || !text.trim()) return;
             stopAll();
@@ -721,7 +716,6 @@
             event?.stopPropagation?.();
             const q = currentRound[currentIndex];
             if (!q) return;
-            // Đọc chunk bằng tiếng Anh
             speak(q.chunk, 'en-US', event?.currentTarget);
         }
 
@@ -738,12 +732,8 @@
         }
 
         // ============================================================
-        // FUZZY MATCH — So sánh câu user vs đáp án
+        // FUZZY MATCH — dùng làm fallback khi AI lỗi
         // ============================================================
-
-        /**
-         * Chuẩn hóa text: lowercase, bỏ dấu câu, gộp khoảng trắng
-         */
         function normalize(str) {
             return (str || '')
                 .toLowerCase()
@@ -752,17 +742,11 @@
                 .trim();
         }
 
-        /**
-         * Tách thành mảng từ
-         */
         function tokenize(str) {
             const n = normalize(str);
             return n ? n.split(' ') : [];
         }
 
-        /**
-         * Levenshtein distance giữa 2 từ
-         */
         function levenshtein(a, b) {
             if (a === b) return 0;
             if (!a.length) return b.length;
@@ -783,29 +767,20 @@
             return matrix[b.length][a.length];
         }
 
-        /**
-         * So khớp 2 từ (cho phép sai chính tả nhỏ)
-         */
         function wordsMatch(a, b) {
             if (a === b) return true;
-            // Cho phép sai 1-2 ký tự với từ dài
             const maxDist = a.length <= 4 ? 1 : 2;
             return levenshtein(a, b) <= maxDist;
         }
 
-        /**
-         * So khớp 2 chuỗi (dùng LCS - Longest Common Subsequence)
-         * Trả về: { score, tokens: [...], matched, total }
-         */
         function compareStrings(userStr, correctStr) {
             const userTokens = tokenize(userStr);
             const correctTokens = tokenize(correctStr);
 
             if (correctTokens.length === 0) {
-                return { score: 0, tokens: [], matched: 0, total: 0, userTokens, correctTokens };
+                return { score: 0, tokens: [], missing: [], matched: 0, total: 0, userTokens, correctTokens };
             }
 
-            // LCS với fuzzy match
             const m = userTokens.length;
             const n = correctTokens.length;
             const dp = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
@@ -821,10 +796,8 @@
             }
 
             const matched = dp[m][n];
-            const score = matched / n; // % khớp với đáp án
+            const score = matched / n;
 
-            // Xây dựng mảng token hiển thị (từ user, có gắn trạng thái)
-            // Dùng backtracking để biết từ nào match
             const displayTokens = [];
             let i = m, j = n;
             const matchedUserIdx = new Set();
@@ -842,7 +815,6 @@
                 }
             }
 
-            // Render: duyệt theo user tokens, từ nào không match thì đánh dấu wrong
             userTokens.forEach((tok, idx) => {
                 if (matchedUserIdx.has(idx)) {
                     displayTokens.push({ type: 'ok', text: tok });
@@ -851,7 +823,6 @@
                 }
             });
 
-            // Thêm từ thiếu vào cuối (dựa trên vị trí thực tế sẽ phức tạp, ta thêm vào sau)
             const missingTokens = [];
             correctTokens.forEach((tok, idx) => {
                 if (!matchedCorrectIdx.has(idx)) {
@@ -870,13 +841,10 @@
             };
         }
 
-        /**
-         * Đánh giá kết quả
-         */
         function evaluate(userStr, correctStr) {
             const result = compareStrings(userStr, correctStr);
-            
-            let verdict; // 'correct' | 'partial' | 'wrong' | 'skip'
+
+            let verdict;
             if (!userStr || userStr === '(Không trả lời)') {
                 verdict = 'skip';
             } else if (result.score >= 0.95) {
@@ -888,6 +856,226 @@
             }
 
             return { ...result, verdict };
+        }
+
+        // ============================================================
+        // 🤖 AI GRADING — Google Gemini
+        // ============================================================
+        function buildGradingPrompt(answers) {
+            const items = answers.map((a, i) => ({
+                id: i + 1,
+                vietnamese: a.vietnamese,
+                chunk: a.chunk,
+                correct_answer: a.correctEnglish,
+                user_answer: a.userAnswer
+            }));
+
+            return `Bạn là giáo viên tiếng Anh chuyên chấm bài cho người Việt học tiếng Anh.
+
+NHIỆM VỤ: Chấm điểm ${answers.length} câu trả lời dưới đây. Mỗi câu có:
+- Câu tiếng Việt gốc (cần dịch)
+- Mẫu câu (chunk) gợi ý
+- Đáp án mẫu tiếng Anh
+- Câu trả lời của học viên
+
+Với MỖI câu, hãy trả về đánh giá theo 4 tiêu chí (thang 0-10):
+1. grammar — Ngữ pháp (thì, số ít/số nhiều, mạo từ, giới từ, cấu trúc câu)
+2. vocabulary — Từ vựng (dùng từ đúng nghĩa, phong phú, phù hợp ngữ cảnh)
+3. naturalness — Độ tự nhiên (người bản xứ có nói vậy không)
+4. meaning — Đúng nghĩa (có truyền đạt đúng ý câu tiếng Việt không)
+
+QUY TẮC CHẤM:
+- Nếu học viên viết ĐÚNG HOÀN TOÀN (khớp đáp án mẫu hoặc tương đương) → điểm 9-10, verdict = "correct"
+- Nếu SAI NHẸ (vẫn hiểu được, chỉ lỗi nhỏ) → điểm 6-8, verdict = "partial"
+- Nếu SAI RÕ (không truyền đạt được ý) → điểm 0-5, verdict = "wrong"
+- Nếu KHÔNG TRẢ LỜI (user_answer rỗng hoặc "(Không trả lời)") → tất cả điểm = 0, verdict = "skip"
+
+QUAN TRỌNG:
+- Học viên có thể dùng từ đồng nghĩa, cách diễn đạt khác mà VẪN ĐÚNG — hãy chấp nhận!
+- Chỉ trừ điểm khi thực sự sai ngữ pháp/nghĩa/tự nhiên.
+- Câu viết HOA/thường, dấu câu, viết tắt (I'm = I am) → KHÔNG trừ điểm.
+
+DỮ LIỆU:
+${JSON.stringify(items, null, 2)}
+
+QUAN TRỌNG: Chỉ trả về JSON object thuần túy, KHÔNG có backtick, KHÔNG có text thừa. Bắt đầu ngay bằng { và kết thúc bằng }. Schema:
+{
+  "results": [
+    {
+      "id": 1,
+      "verdict": "correct" | "partial" | "wrong" | "skip",
+      "scores": {
+        "grammar": 0-10,
+        "vocabulary": 0-10,
+        "naturalness": 0-10,
+        "meaning": 0-10,
+        "overall": 0-10
+      },
+      "overall_percent": 0-100,
+      "feedback_vi": "Nhận xét ngắn gọn bằng tiếng Việt (1-2 câu)",
+      "suggestion_vi": "Gợi ý cải thiện cụ thể bằng tiếng Việt (1-2 câu). Nếu đã đúng hoàn hảo thì ghi 'Câu này đã rất tốt!'"
+    }
+  ]
+}`;
+        }
+
+        async function gradeWithAI(answers) {
+            if (!GEMINI_API_KEY || GEMINI_API_KEY.includes('DÁN_API_KEY')) {
+                throw new Error('Chưa cấu hình GEMINI_API_KEY trong code');
+            }
+
+            const prompt = buildGradingPrompt(answers);
+            const body = {
+                model: GEMINI_MODEL,
+                input: prompt,
+            };
+
+            // ⚡ Thử lại tối đa 3 lần nếu gặp lỗi 503 / 429 / lỗi mạng
+            const MAX_RETRIES = 3;
+            const RETRY_DELAY_MS = [3000, 8000, 15000]; // 3s → 8s → 15s
+
+            let lastError = null;
+
+            for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+                if (attempt > 0) {
+                    console.log(`⏳ Thử lại lần ${attempt + 1}/${MAX_RETRIES} sau ${RETRY_DELAY_MS[attempt-1]/1000}s...`);
+                    await new Promise(r => setTimeout(r, RETRY_DELAY_MS[attempt - 1]));
+                }
+
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
+
+                try {
+                    const res = await fetch(GEMINI_ENDPOINT, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ model: GEMINI_MODEL, body: requestBody })
+                    });
+
+                    clearTimeout(timeoutId);
+
+                    // ✅ Thành công
+                    if (res.ok) {
+                        const data = await res.json();
+                        // Thử schema mới (steps) trước, rồi fallback sang schema cũ (outputs)
+const textFromSteps = data.steps?.find(s => s.type === 'model_output')?.content?.find(c => c.type === 'text')?.text;
+const textFromOutputs = data.outputs?.find(o => o.type === 'text')?.text;
+const text = textFromSteps || textFromOutputs;
+
+                        if (!text) {
+                            throw new Error('Gemini không trả về nội dung (có thể bị chặn safety)');
+                        }
+
+                        let cleanText = text.trim();
+                        if (cleanText.startsWith('```')) {
+                            cleanText = cleanText.replace(/^```(?:json)?\s*/, '').replace(/```\s*$/, '');
+                        }
+
+                        let parsed;
+                        try {
+                            parsed = JSON.parse(cleanText);
+                        } catch (e) {
+                            console.error('JSON parse failed. Raw text:', text);
+                            throw new Error('Không parse được JSON từ AI. Xem Console để biết chi tiết');
+                        }
+
+                        if (!parsed.results || !Array.isArray(parsed.results)) {
+                            throw new Error('AI trả về sai định dạng (thiếu "results")');
+                        }
+
+                        return parsed.results;
+                    }
+
+                    // ❌ Lỗi — đọc và phân loại
+                    const errText = await res.text();
+                    console.error(`Gemini error lần ${attempt + 1}:`, res.status, errText);
+
+                    let errMsg = `Gemini API lỗi ${res.status}`;
+                    try {
+                        const errJson = JSON.parse(errText);
+                        errMsg += ': ' + (errJson.error?.message || errText.slice(0, 200));
+                    } catch { errMsg += ': ' + errText.slice(0, 200); }
+
+                    // Nếu là 503 (quá tải) hoặc 429 (vượt quota) → thử lại
+                    if (res.status === 503 || res.status === 429) {
+                        lastError = new Error(errMsg);
+                        continue; // chuyển sang lần thử tiếp theo
+                    }
+
+                    // Các lỗi khác (400, 401, 403, 404...) → dừng luôn, không thử lại
+                    throw new Error(errMsg);
+
+                } catch (err) {
+                    clearTimeout(timeoutId);
+
+                    // Lỗi timeout hoặc lỗi mạng → cũng thử lại
+                    if (err.name === 'AbortError') {
+                        lastError = new Error('AI chấm quá lâu (timeout)');
+                        continue;
+                    }
+                    if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
+                        lastError = err;
+                        continue;
+                    }
+
+                    // Lỗi parse JSON hoặc lỗi khác → dừng luôn
+                    throw err;
+                }
+            }
+
+            // Đã thử hết 3 lần mà vẫn lỗi
+            throw new Error(
+                (lastError?.message || 'Lỗi không xác định') +
+                ` — Đã thử lại ${MAX_RETRIES} lần nhưng server Google vẫn quá tải. Vui lòng đợi 1-2 phút rồi thử lại.`
+            );
+        }
+
+        // ---- Cache kết quả AI ----
+        const AI_CACHE_KEY = 'eng_practice_ai_cache_v1';
+        const AI_CACHE_TTL = 7 * 24 * 60 * 60 * 1000;
+
+        function getAICache() {
+            try {
+                const raw = localStorage.getItem(AI_CACHE_KEY);
+                return raw ? JSON.parse(raw) : {};
+            } catch { return {}; }
+        }
+
+        function setAICache(cache) {
+            try {
+                const keys = Object.keys(cache);
+                if (keys.length > 500) {
+                    const sorted = keys.sort((a, b) => (cache[a].ts || 0) - (cache[b].ts || 0));
+                    sorted.slice(0, keys.length - 500).forEach(k => delete cache[k]);
+                }
+                localStorage.setItem(AI_CACHE_KEY, JSON.stringify(cache));
+            } catch (e) { console.warn('AI cache failed:', e); }
+        }
+
+        function hashAnswer(userAns, correctAns) {
+            const str = (userAns || '').toLowerCase().trim() + '|||' + (correctAns || '').toLowerCase().trim();
+            let h = 0;
+            for (let i = 0; i < str.length; i++) {
+                h = ((h << 5) - h) + str.charCodeAt(i);
+                h |= 0;
+            }
+            return 'h' + Math.abs(h).toString(36);
+        }
+
+        function getCachedGrade(userAns, correctAns) {
+            const cache = getAICache();
+            const key = hashAnswer(userAns, correctAns);
+            const entry = cache[key];
+            if (!entry) return null;
+            if (Date.now() - entry.ts > AI_CACHE_TTL) return null;
+            return entry.result;
+        }
+
+        function setCachedGrade(userAns, correctAns, result) {
+            const cache = getAICache();
+            const key = hashAnswer(userAns, correctAns);
+            cache[key] = { ts: Date.now(), result };
+            setAICache(cache);
         }
 
         // ============================================================
@@ -903,7 +1091,7 @@
         }
 
         // ============================================================
-        // CACHE
+        // CACHE DỮ LIỆU SHEET
         // ============================================================
         function getCachedData() {
             try {
@@ -1072,6 +1260,7 @@
             currentRound = shuffleArray([...allQuestions]).slice(0, QUESTIONS_PER_ROUND);
             currentIndex = 0;
             userAnswers = [];
+            isGrading = false;
             showScreen('screen-practice');
             renderQuestion();
         }
@@ -1093,7 +1282,7 @@
         }
 
         // ============================================================
-        // RENDER
+        // RENDER QUESTION
         // ============================================================
         function renderQuestion() {
             const q = currentRound[currentIndex];
@@ -1114,7 +1303,6 @@
 
             document.getElementById('userAnswer').focus();
 
-            // 🔊 Tự động đọc câu tiếng Việt nếu bật
             const autoSpeak = document.getElementById('autoSpeak').checked;
             if (autoSpeak) {
                 setTimeout(() => {
@@ -1155,6 +1343,7 @@
         // SUBMIT
         // ============================================================
         function submitAnswer(timeout = false) {
+            if (isGrading) return;
             if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
 
             const answer = document.getElementById('userAnswer').value.trim();
@@ -1174,32 +1363,97 @@
         }
 
         // ============================================================
-        // SUMMARY
+        // SUMMARY — có tích hợp AI
         // ============================================================
-        function showSummary() {
+        async function showSummary() {
+            isGrading = true;
+            showScreen('screen-summary');
+
             const listEl = document.getElementById('summaryList');
             const statsEl = document.getElementById('summaryStats');
+            const scoreEl = document.getElementById('scoreDisplay');
+
             listEl.innerHTML = '';
             statsEl.innerHTML = '';
+            scoreEl.textContent = '⏳ Đang chấm...';
 
-            // Đánh giá từng câu
-            const evaluated = userAnswers.map(ans => {
+            // ─── BƯỚC 1: Chấm local (luôn có, làm fallback) ───
+            let evaluated = userAnswers.map(ans => {
                 const ev = evaluate(ans.userAnswer, ans.correctEnglish);
-                return { ...ans, eval: ev };
+                return { ...ans, eval: ev, aiResult: null };
             });
 
-            const correctCount = evaluated.filter(a => a.eval.verdict === 'correct').length;
-            const partialCount = evaluated.filter(a => a.eval.verdict === 'partial').length;
-            const wrongCount = evaluated.filter(a => a.eval.verdict === 'wrong').length;
-            const skipCount = evaluated.filter(a => a.eval.verdict === 'skip').length;
+            // ─── BƯỚC 2: Chấm bằng AI ───
+            let aiError = null;
+
+            if (USE_AI_GRADING) {
+                listEl.innerHTML = `
+                    <div class="loading" style="padding: 40px 20px;">
+                        <span class="spinner"></span>
+                        🤖 AI đang chấm ${userAnswers.length} câu...<br>
+                        <span style="font-size: 13px; color: #888; margin-top: 8px; display: inline-block;">
+                            (Có thể mất 10-30 giây)
+                        </span>
+                    </div>
+                `;
+
+                try {
+                    const cachedResults = evaluated.map(a =>
+                        getCachedGrade(a.userAnswer, a.correctEnglish)
+                    );
+                    const allCached = cachedResults.every(r => r !== null);
+
+                    let aiResults;
+                    if (allCached) {
+                        console.log('✅ Dùng AI cache cho tất cả câu');
+                        aiResults = cachedResults;
+                    } else {
+                        aiResults = await gradeWithAI(userAnswers);
+                        aiResults.forEach((r, i) => {
+                            if (userAnswers[i]) {
+                                setCachedGrade(
+                                    userAnswers[i].userAnswer,
+                                    userAnswers[i].correctEnglish,
+                                    r
+                                );
+                            }
+                        });
+                    }
+
+                    aiResults.forEach((r, i) => {
+                        if (evaluated[i]) evaluated[i].aiResult = r;
+                    });
+
+                } catch (err) {
+                    console.error('AI grading failed:', err);
+                    aiError = err.message;
+                }
+            }
+
+            // Xóa loading, render kết quả
+            listEl.innerHTML = '';
+
+            // ─── Helpers ───
+            const getVerdict = (item) => {
+                if (item.aiResult?.verdict) return item.aiResult.verdict;
+                return item.eval.verdict;
+            };
+            const getPercent = (item) => {
+                if (item.aiResult?.overall_percent != null) return item.aiResult.overall_percent;
+                return Math.round(item.eval.score * 100);
+            };
+
+            const correctCount = evaluated.filter(a => getVerdict(a) === 'correct').length;
+            const partialCount = evaluated.filter(a => getVerdict(a) === 'partial').length;
+            const wrongCount   = evaluated.filter(a => getVerdict(a) === 'wrong').length;
+            const skipCount    = evaluated.filter(a => getVerdict(a) === 'skip').length;
             const avgScore = Math.round(
-                evaluated.reduce((s, a) => s + a.eval.score, 0) / evaluated.length * 100
+                evaluated.reduce((s, a) => s + getPercent(a), 0) / evaluated.length
             );
 
-            document.getElementById('scoreDisplay').textContent =
-                `${correctCount} / ${currentRound.length} (${avgScore}%)`;
+            const scorePrefix = aiError ? '⚠️ ' : (USE_AI_GRADING && !aiError ? '🤖 ' : '');
+            scoreEl.textContent = `${scorePrefix}${correctCount} / ${evaluated.length} (${avgScore}%)`;
 
-            // Stats
             statsEl.innerHTML = `
                 <div class="stat-box green">
                     <div class="num">${correctCount}</div>
@@ -1219,21 +1473,29 @@
                 </div>
             `;
 
-            // Chi tiết từng câu
+            // Banner cảnh báo AI lỗi
+            if (aiError) {
+                const warn = document.createElement('div');
+                warn.style.cssText = 'background:#fff3e0; border-left:5px solid #ff9800; padding:12px 16px; border-radius:8px; margin-bottom:15px; font-size:14px; color:#e65100;';
+                warn.innerHTML = `⚠️ <b>AI chấm thất bại</b> — đã dùng chấm điểm cục bộ.<br><span style="font-size:12px; color:#888;">Lỗi: ${escapeHtml(aiError)}</span>`;
+                listEl.appendChild(warn);
+            }
+
+            // ─── Render từng câu ───
             evaluated.forEach((ans, i) => {
                 const div = document.createElement('div');
-                div.className = 'summary-item ' + ans.eval.verdict;
+                const verdict = getVerdict(ans);
+                const percent = getPercent(ans);
+                div.className = 'summary-item ' + verdict;
 
-                // Badge
                 let badge = '';
-                if (ans.eval.verdict === 'correct') badge = '<span class="badge badge-correct">✅ Đúng</span>';
-                else if (ans.eval.verdict === 'partial') badge = '<span class="badge badge-partial">⚠️ Gần đúng</span>';
-                else if (ans.eval.verdict === 'wrong') badge = '<span class="badge badge-wrong">❌ Sai</span>';
+                if (verdict === 'correct') badge = '<span class="badge badge-correct">✅ Đúng</span>';
+                else if (verdict === 'partial') badge = '<span class="badge badge-partial">⚠️ Gần đúng</span>';
+                else if (verdict === 'wrong') badge = '<span class="badge badge-wrong">❌ Sai</span>';
                 else badge = '<span class="badge badge-skip">⏭️ Bỏ qua</span>';
 
-                // Highlight từ user viết
                 let userHighlighted = '';
-                if (ans.eval.verdict === 'skip') {
+                if (verdict === 'skip') {
                     userHighlighted = '<i style="color:#999">(Không trả lời)</i>';
                 } else {
                     userHighlighted = ans.eval.tokens.map(t => {
@@ -1242,12 +1504,8 @@
                     }).join(' ');
                 }
 
-                // Highlight đáp án (dùng cùng cơ chế)
-                const correctEval = compareStrings(ans.correctEnglish, ans.correctEnglish);
-                // Đơn giản: hiển thị đáp án nguyên gốc với từ thiếu được đánh dấu
                 let correctDisplay = '';
-                if (ans.eval.missing && ans.eval.missing.length > 0) {
-                    // Đáp án: chỉ highlight từ thiếu, còn lại bình thường
+                if (ans.eval.missing && ans.eval.missing.length > 0 && !ans.aiResult) {
                     const missingSet = new Set(ans.eval.missing);
                     const correctTokensOrig = ans.correctEnglish.split(/\s+/);
                     correctDisplay = correctTokensOrig.map(tok => {
@@ -1261,7 +1519,52 @@
                     correctDisplay = escapeHtml(ans.correctEnglish);
                 }
 
-                const percent = Math.round(ans.eval.score * 100);
+                // Khối AI
+                let aiBlock = '';
+                if (ans.aiResult) {
+                    const s = ans.aiResult.scores || {};
+                    const scoreBar = (label, val) => {
+                        const v = Math.max(0, Math.min(10, Number(val) || 0));
+                        const pct = v * 10;
+                        const color = v >= 8 ? '#4caf50' : v >= 6 ? '#ff9800' : '#f44336';
+                        return `
+                            <div style="display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 13px;">
+                                <span style="width: 100px; color: #555;">${label}</span>
+                                <div style="flex: 1; height: 8px; background: #eee; border-radius: 4px; overflow: hidden;">
+                                    <div style="width: ${pct}%; height: 100%; background: ${color}; transition: width 0.5s;"></div>
+                                </div>
+                                <span style="width: 40px; text-align: right; font-weight: bold; color: ${color};">${v}/10</span>
+                            </div>
+                        `;
+                    };
+
+                    aiBlock = `
+                        <div style="background: #f0f4ff; border-radius: 8px; padding: 12px 15px; margin-top: 10px;">
+                            <div style="font-size: 13px; font-weight: bold; color: #667eea; margin-bottom: 8px;">
+                                🤖 AI đánh giá theo tiêu chí:
+                            </div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px;">
+                                ${scoreBar('📝 Ngữ pháp', s.grammar)}
+                                ${scoreBar('📚 Từ vựng', s.vocabulary)}
+                                ${scoreBar('💬 Tự nhiên', s.naturalness)}
+                                ${scoreBar('🎯 Đúng nghĩa', s.meaning)}
+                            </div>
+                            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #d0d8ee;">
+                                ${scoreBar('⭐ Tổng thể', s.overall)}
+                            </div>
+                        </div>
+                        ${ans.aiResult.feedback_vi ? `
+                            <div style="background: #f9f9f9; border-radius: 8px; padding: 12px 15px; margin-top: 8px; font-size: 14px; line-height: 1.6;">
+                                <b style="color: #555;">💬 Nhận xét:</b> ${escapeHtml(ans.aiResult.feedback_vi)}
+                            </div>
+                        ` : ''}
+                        ${ans.aiResult.suggestion_vi ? `
+                            <div style="background: #fff8e1; border-left: 4px solid #ffc107; border-radius: 8px; padding: 12px 15px; margin-top: 8px; font-size: 14px; line-height: 1.6;">
+                                <b style="color: #f57c00;">💡 Gợi ý cải thiện:</b> ${escapeHtml(ans.aiResult.suggestion_vi)}
+                            </div>
+                        ` : ''}
+                    `;
+                }
 
                 div.innerHTML = `
                     <div class="summary-answer" style="justify-content: space-between; align-items: flex-start;">
@@ -1273,12 +1576,12 @@
                         </div>
                         <div>${badge}</div>
                     </div>
-                    
+
                     <div style="margin: 12px 0; font-size: 15px; line-height: 1.9;">
                         <b>✍️ Bạn viết:</b><br>
                         ${userHighlighted}
                     </div>
-                    
+
                     ${ans.correctEnglish ? `
                         <div class="summary-correct">
                             <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;">
@@ -1288,17 +1591,19 @@
                                         ${correctDisplay}
                                     </span>
                                 </div>
-                                <button class="speaker-btn" 
+                                <button class="speaker-btn"
                                         style="border-color: #2e7d32; color: #2e7d32; width: 34px; height: 34px; font-size: 16px;"
                                         onclick="speakEnglish('${escapeAttr(ans.correctEnglish)}', event)"
                                         title="Đọc đáp án">🔊</button>
                             </div>
                         </div>
                     ` : ''}
-                    
+
+                    ${aiBlock}
+
                     <div style="font-size: 13px; color: #888; margin-top: 10px;">
                         💡 Chunk: <b>${escapeHtml(ans.chunk)}</b>
-                        <button class="speaker-btn" 
+                        <button class="speaker-btn"
                                 style="border-color: #667eea; color: #667eea; width: 26px; height: 26px; font-size: 12px; margin-left: 6px;"
                                 onclick="speakEnglish('${escapeAttr(ans.chunk)}', event)"
                                 title="Đọc chunk">🔊</button>
@@ -1307,7 +1612,7 @@
                 listEl.appendChild(div);
             });
 
-            showScreen('screen-summary');
+            isGrading = false;
         }
 
         function escapeHtml(text) {
@@ -1329,7 +1634,7 @@
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.ctrlKey && !e.shiftKey) {
                 const practiceActive = document.getElementById('screen-practice').classList.contains('active');
-                if (practiceActive && document.activeElement?.id === 'userAnswer') {
+                if (practiceActive && document.activeElement?.id === 'userAnswer' && !isGrading) {
                     e.preventDefault();
                     submitAnswer();
                 }
