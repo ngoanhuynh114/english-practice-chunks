@@ -920,9 +920,9 @@ QUAN TRỌNG: Chỉ trả về JSON object thuần túy, KHÔNG có backtick, KH
         }
 
         async function gradeWithAI(answers) {
-            if (!GEMINI_API_KEY || GEMINI_API_KEY.includes('DÁN_API_KEY')) {
-                throw new Error('Chưa cấu hình GEMINI_API_KEY trong code');
-            }
+            if (!GEMINI_ENDPOINT) {
+            throw new Error('Chưa cấu hình GEMINI_ENDPOINT');
+        }
 
             const prompt = buildGradingPrompt(answers);
             const body = {
@@ -949,7 +949,7 @@ QUAN TRỌNG: Chỉ trả về JSON object thuần túy, KHÔNG có backtick, KH
                     const res = await fetch(GEMINI_ENDPOINT, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ model: GEMINI_MODEL, body: requestBody })
+                        body: JSON.stringify({ model: GEMINI_MODEL, body: body })
                     });
 
                     clearTimeout(timeoutId);
