@@ -539,7 +539,7 @@
         // 🤖 AI GRADING CONFIG — DÁN API KEY VÀO ĐÂY
         // ═══════════════════════════════════════════════
         const GEMINI_API_KEY = '';   // ← thay bằng AIzaSy...
-        const GEMINI_MODEL = 'gemini-3.5-flash';
+        const GEMINI_MODEL = 'gemini-3.1-flash-lite';
         const GEMINI_ENDPOINT = `https://jolly-breeze-e4f5.ngoanhuynh114.workers.dev/`;
         const USE_AI_GRADING = true;      // false → dùng chấm cục bộ
         const AI_TIMEOUT_MS = 90000;      // 90s
@@ -925,10 +925,6 @@ QUAN TRỌNG: Chỉ trả về JSON object thuần túy, KHÔNG có backtick, KH
         }
 
             const prompt = buildGradingPrompt(answers);
-            const body = {
-                model: GEMINI_MODEL,
-                input: prompt,
-            };
 
             // ⚡ Thử lại tối đa 3 lần nếu gặp lỗi 503 / 429 / lỗi mạng
             const MAX_RETRIES = 3;
@@ -949,7 +945,10 @@ QUAN TRỌNG: Chỉ trả về JSON object thuần túy, KHÔNG có backtick, KH
                     const res = await fetch(GEMINI_ENDPOINT, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ model: GEMINI_MODEL, body: body })
+                        body: JSON.stringify({
+                            model: GEMINI_MODEL,
+                            body: { contents: [{ parts: [{ text: prompt }] }] }
+                        })
                     });
 
                     clearTimeout(timeoutId);
@@ -958,9 +957,7 @@ QUAN TRỌNG: Chỉ trả về JSON object thuần túy, KHÔNG có backtick, KH
                     if (res.ok) {
                         const data = await res.json();
                         // Thử schema mới (steps) trước, rồi fallback sang schema cũ (outputs)
-const textFromSteps = data.steps?.find(s => s.type === 'model_output')?.content?.find(c => c.type === 'text')?.text;
-const textFromOutputs = data.outputs?.find(o => o.type === 'text')?.text;
-const text = textFromSteps || textFromOutputs;
+const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
                         if (!text) {
                             throw new Error('Gemini không trả về nội dung (có thể bị chặn safety)');
