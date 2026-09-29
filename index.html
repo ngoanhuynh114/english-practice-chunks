@@ -966,8 +966,12 @@ QUAN TRỌNG: Chỉ trả về JSON object thuần túy, KHÔNG có backtick, KH
                         const data = await res.json();
                         const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
+                        // Debug: xem Gemini trả về gì
+                        console.log('Gemini raw response:', JSON.stringify(data).slice(0, 500));
+
                         if (!text) {
-                            throw new Error('Gemini không trả về nội dung (có thể bị chặn safety)');
+                            const blockReason = data.promptFeedback?.blockReason || data.candidates?.[0]?.finishReason || 'unknown';
+                            throw new Error('Gemini không trả về nội dung. Lý do: ' + blockReason);
                         }
 
                         let cleanText = text.trim();
