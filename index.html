@@ -975,8 +975,10 @@ QUAN TRỌNG: Chỉ trả về JSON object thuần túy, KHÔNG có backtick, KH
                         }
 
                         let cleanText = text.trim();
-                        if (cleanText.startsWith('```')) {
-                            cleanText = cleanText.replace(/^```(?:json)?\s*/, '').replace(/```\s*$/, '');
+                        const firstBrace = cleanText.indexOf('{');
+                        const lastBrace = cleanText.lastIndexOf('}');
+                        if (firstBrace !== -1 && lastBrace > firstBrace) {
+                            cleanText = cleanText.slice(firstBrace, lastBrace + 1);
                         }
 
                         let parsed;
@@ -1001,7 +1003,7 @@ QUAN TRỌNG: Chỉ trả về JSON object thuần túy, KHÔNG có backtick, KH
                     let errMsg = `Gemini API lỗi ${res.status}`;
                     try {
                         const errJson = JSON.parse(errText);
-                        errMsg += ': ' + (errJson.error?.message || errText.slice(0, 200));
+                        errMsg += ': ' + (errJson.message || errJson.error?.message || errText.slice(0, 200));
                     } catch { errMsg += ': ' + errText.slice(0, 200); }
 
                     // Nếu là 503 (quá tải) hoặc 429 (vượt quota) → thử lại
@@ -1034,7 +1036,7 @@ QUAN TRỌNG: Chỉ trả về JSON object thuần túy, KHÔNG có backtick, KH
             // Đã thử hết 3 lần mà vẫn lỗi
             throw new Error(
                 (lastError?.message || 'Lỗi không xác định') +
-                ` — Đã thử lại ${MAX_RETRIES} lần nhưng server Google vẫn quá tải. Vui lòng đợi 1-2 phút rồi thử lại.`
+                ` — Đã thử lại ${MAX_RETRIES} lần nhưng server AI vẫn quá tải. Vui lòng đợi 1-2 phút rồi thử lại.`
             );
         }
 
