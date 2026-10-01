@@ -528,6 +528,85 @@
             background: #667eea;
             color: white;
         }
+
+        /* ===== Hộp thoại chọn thời gian (chế độ tính giờ) ===== */
+        .timer-modal {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background: rgba(30, 27, 75, 0.55);
+            -webkit-backdrop-filter: blur(4px);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+        }
+        .timer-modal.open { display: flex; animation: fadeIn 0.2s ease-in; }
+
+        .timer-modal-box {
+            background: white;
+            border-radius: 24px;
+            padding: 30px 26px;
+            width: 100%;
+            max-width: 440px;
+            text-align: center;
+            box-shadow: 0 25px 70px rgba(0, 0, 0, 0.35);
+            animation: modalPop 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        @keyframes modalPop {
+            from { opacity: 0; transform: scale(0.85) translateY(20px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+
+        .timer-modal-icon { font-size: 46px; margin-bottom: 6px; }
+        .timer-modal-box h3 { color: #333; font-size: 22px; margin-bottom: 6px; }
+        .timer-modal-sub { color: #777; font-size: 14px; margin-bottom: 22px; }
+
+        .timer-options { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+        .timer-option {
+            border: 2px solid #e3e7f5;
+            background: #f8f9ff;
+            border-radius: 16px;
+            padding: 16px 8px;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+        .timer-option:hover { border-color: #667eea; transform: translateY(-2px); }
+        .timer-option .t-num { display: block; font-size: 30px; font-weight: 800; color: #667eea; line-height: 1.1; }
+        .timer-option .t-label { display: block; font-size: 12.5px; color: #777; margin-top: 4px; }
+        .timer-option.selected {
+            border-color: #667eea;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+        }
+        .timer-option.selected .t-num,
+        .timer-option.selected .t-label { color: white; }
+
+        .timer-custom-row { display: none; align-items: center; justify-content: center; gap: 10px; margin-top: 16px; }
+        .timer-custom-row.show { display: flex; }
+        .timer-custom-row input {
+            width: 110px;
+            padding: 10px 12px;
+            font-size: 20px;
+            font-weight: bold;
+            text-align: center;
+            border: 2px solid #667eea;
+            border-radius: 12px;
+            outline: none;
+            font-family: inherit;
+        }
+        .timer-custom-row span { color: #555; font-weight: 600; }
+
+        .timer-hint { min-height: 20px; margin: 16px 0 6px; font-size: 13.5px; font-weight: 600; color: #667eea; }
+        .timer-hint.error { color: #d32f2f; }
+
+        .timer-modal-actions { display: flex; gap: 12px; }
+        .timer-modal-actions .btn { margin-top: 0; padding: 14px 10px; flex: 1; }
+        .timer-modal-actions .btn-primary { width: auto; flex: 2; }
+        .btn-cancel { background: #eef0f7; color: #555; }
+        .btn-cancel:hover { background: #e1e5f2; }
     </style>
 </head>
 <body>
@@ -537,9 +616,8 @@
         // 🔥 CẤU HÌNH 🔥
         const SHEET_ID = '1y5yHq2FLjnirbfao_0kHBcrnNXySsCVc7psvfO3zOHM';
         const QUESTIONS_PER_ROUND = 10;
-        const TIMED_START_SECONDS = 60;
-        const TIMED_DECREMENT = 10;
-        const MIN_TIME = 10;
+        const TIMER_CUSTOM_MIN = 10;    // thời gian tối thiểu khi tự chọn (giây)
+        const TIMER_CUSTOM_MAX = 300;   // thời gian tối đa khi tự chọn (giây)
         const CACHE_DURATION_MS = 5 * 60 * 1000;
 
         // ═══════════════════════════════════════════════
@@ -577,9 +655,89 @@
                     <h3>📝 Chế độ tự do</h3>
                     <p>Không giới hạn thời gian</p>
                 </div>
-                <div class="mode-card" onclick="startMode('timed')">
+                <div class="mode-card" onclick="openTimerModal()">
                     <h3>⏱️ Chế độ tính giờ</h3>
-                    <p>60s → 50s → 40s ... (giảm dần)</p>
+                    <p>Chọn thời gian mỗi câu: 60s, 40s, 20s hoặc tự chọn</p>
+                </div>
+                <div class="mode-card" style="grid-column: 1 / -1;" onclick="startMode('review')">
+                    <h3>📒 Ôn câu sai</h3>
+                    <p id="reviewCount">Chưa có câu nào trong sổ tay</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== HỘP THOẠI CHỌN THỜI GIAN (chế độ tính giờ) ===== -->
+        <div class="timer-modal" id="timerModal" onclick="if (event.target === this) closeTimerModal()">
+            <div class="timer-modal-box" role="dialog" aria-modal="true" aria-labelledby="timerModalTitle">
+                <div class="timer-modal-icon">⏱️</div>
+                <h3 id="timerModalTitle">Chọn thời gian mỗi câu</h3>
+                <p class="timer-modal-sub">Mỗi câu hỏi có cùng một khoảng thời gian để trả lời</p>
+
+                <div class="timer-options">
+                    <button type="button" class="timer-option" data-value="60" onclick="chooseTimer(60)">
+                        <span class="t-num">60s</span><span class="t-label">Thong thả</span>
+                    </button>
+                    <button type="button" class="timer-option" data-value="40" onclick="chooseTimer(40)">
+                        <span class="t-num">40s</span><span class="t-label">Vừa phải</span>
+                    </button>
+                    <button type="button" class="timer-option" data-value="20" onclick="chooseTimer(20)">
+                        <span class="t-num">20s</span><span class="t-label">Thử thách</span>
+                    </button>
+                    <button type="button" class="timer-option" data-value="custom" onclick="chooseTimer('custom')">
+                        <span class="t-num">✏️</span><span class="t-label">Tự chọn</span>
+                    </button>
+                </div>
+
+                <div class="timer-custom-row" id="timerCustomRow">
+                    <input type="number" id="timerCustomInput" value="30" inputmode="numeric"
+                           oninput="renderTimerModal()"
+                           onkeydown="if (event.key === 'Enter') startTimedFromModal()">
+                    <span>giây / câu</span>
+                </div>
+
+                <div class="timer-hint" id="timerHint"></div>
+
+                <div class="timer-modal-actions">
+                    <button type="button" class="btn btn-cancel" onclick="closeTimerModal()">Hủy</button>
+                    <button type="button" class="btn btn-primary" onclick="startTimedFromModal()">🚀 Bắt đầu</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== HỘP THOẠI CHỌN THỜI GIAN (chế độ tính giờ) ===== -->
+        <div class="timer-modal" id="timerModal" onclick="if (event.target === this) closeTimerModal()">
+            <div class="timer-modal-box" role="dialog" aria-modal="true" aria-labelledby="timerModalTitle">
+                <div class="timer-modal-icon">⏱️</div>
+                <h3 id="timerModalTitle">Chọn thời gian mỗi câu</h3>
+                <p class="timer-modal-sub">Mỗi câu hỏi có cùng một khoảng thời gian để trả lời</p>
+
+                <div class="timer-options">
+                    <button type="button" class="timer-option" data-value="60" onclick="chooseTimer(60)">
+                        <span class="t-num">60s</span><span class="t-label">Thong thả</span>
+                    </button>
+                    <button type="button" class="timer-option" data-value="40" onclick="chooseTimer(40)">
+                        <span class="t-num">40s</span><span class="t-label">Vừa phải</span>
+                    </button>
+                    <button type="button" class="timer-option" data-value="20" onclick="chooseTimer(20)">
+                        <span class="t-num">20s</span><span class="t-label">Thử thách</span>
+                    </button>
+                    <button type="button" class="timer-option" data-value="custom" onclick="chooseTimer('custom')">
+                        <span class="t-num">✏️</span><span class="t-label">Tự chọn</span>
+                    </button>
+                </div>
+
+                <div class="timer-custom-row" id="timerCustomRow">
+                    <input type="number" id="timerCustomInput" value="30" inputmode="numeric"
+                           oninput="renderTimerModal()"
+                           onkeydown="if (event.key === 'Enter') startTimedFromModal()">
+                    <span>giây / câu</span>
+                </div>
+
+                <div class="timer-hint" id="timerHint"></div>
+
+                <div class="timer-modal-actions">
+                    <button type="button" class="btn btn-cancel" onclick="closeTimerModal()">Hủy</button>
+                    <button type="button" class="btn btn-primary" onclick="startTimedFromModal()">🚀 Bắt đầu</button>
                 </div>
             </div>
         </div>
@@ -667,6 +825,8 @@
         let mode = 'free';
         let timerInterval = null;
         let timeLeft = 0;
+        let timeTotal = 60;      // tổng thời gian của câu hiện tại (để tính màu cảnh báo)
+        let timedSeconds = 60;   // số giây mỗi câu do người dùng chọn
         let isGrading = false;
 
         // ============================================================
@@ -1094,6 +1254,7 @@ QUAN TRỌNG: Chỉ trả về JSON object thuần túy, KHÔNG có backtick, KH
         function showScreen(id) {
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
             document.getElementById(id).classList.add('active');
+            if (id === 'screen-mode') updateReviewCard();
         }
 
         function setStatus(text) {
@@ -1267,7 +1428,15 @@ QUAN TRỌNG: Chỉ trả về JSON object thuần túy, KHÔNG có backtick, KH
         // ============================================================
         function startMode(selectedMode) {
             mode = selectedMode;
-            currentRound = shuffleArray([...allQuestions]).slice(0, QUESTIONS_PER_ROUND);
+            if (selectedMode === 'review') {
+                currentRound = buildReviewRound();
+                if (currentRound.length === 0) {
+                    alert('Chưa có câu nào đến hạn ôn. Hãy luyện thêm ở chế độ tự do hoặc quay lại sau nhé!');
+                    return;
+                }
+            } else {
+                currentRound = shuffleArray([...allQuestions]).slice(0, QUESTIONS_PER_ROUND);
+            }
             currentIndex = 0;
             userAnswers = [];
             isGrading = false;
@@ -1276,6 +1445,15 @@ QUAN TRỌNG: Chỉ trả về JSON object thuần túy, KHÔNG có backtick, KH
         }
 
         function backToMode() {
+            // Đang làm dở bài → hỏi xác nhận trước khi thoát
+            const practiceActive = document.getElementById('screen-practice').classList.contains('active');
+            if (practiceActive && currentIndex > 0 && currentIndex < currentRound.length) {
+                if (!confirm('Thoát khỏi lượt luyện tập? Các câu đã làm trong lượt này sẽ không được chấm.')) return;
+            }
+
+            // Dừng đồng hồ (chế độ tính giờ)
+            if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+
             synth.cancel();
             document.querySelectorAll('.speaker-btn.speaking')
                 .forEach(b => b.classList.remove('speaking'));
@@ -1289,6 +1467,80 @@ QUAN TRỌNG: Chỉ trả về JSON object thuần túy, KHÔNG có backtick, KH
                 [arr[i], arr[j]] = [arr[j], arr[i]];
             }
             return arr;
+        }
+        
+        // ============================================================
+        // 📒 SỔ TAY CÂU SAI + ÔN TẬP NGẮT QUÃNG (Leitner)
+        // ============================================================
+        const SRS_KEY = 'eng_practice_srs_v1';
+        const SRS_INTERVAL_DAYS = [0, 1, 3, 7, 14]; // khoảng cách ôn của hộp 1 → 5
+        const DAY_MS = 24 * 60 * 60 * 1000;
+
+        function qKey(q) {
+            return ((q.chunk || '') + '|' + (q.vietnamese || '')).toLowerCase().trim();
+        }
+
+        function loadSRS() {
+            try { return JSON.parse(localStorage.getItem(SRS_KEY)) || {}; }
+            catch { return {}; }
+        }
+
+        function saveSRS(data) {
+            try { localStorage.setItem(SRS_KEY, JSON.stringify(data)); }
+            catch (e) { console.warn('Không lưu được sổ tay:', e); }
+        }
+
+        // items: [{ q: {chunk, vietnamese, english}, verdict }]
+        function recordResults(items) {
+            const srs = loadSRS();
+            const now = Date.now();
+
+            items.forEach(({ q, verdict }) => {
+                const key = qKey(q);
+                const card = srs[key];
+
+                if (verdict === 'correct') {
+                    if (!card) return;                       // câu chưa từng sai → bỏ qua
+                    const nextBox = card.box + 1;
+                    if (nextBox > SRS_INTERVAL_DAYS.length) { // vượt hộp 5 → đã thuộc
+                        delete srs[key];
+                        return;
+                    }
+                    card.box = nextBox;
+                    card.due = now + SRS_INTERVAL_DAYS[nextBox - 1] * DAY_MS;
+                } else if (verdict === 'partial') {           // gần đúng: giữ hộp, ôn lại sau 1 ngày
+                    if (card) card.due = now + DAY_MS;
+                    else srs[key] = { q, box: 1, due: now + DAY_MS, wrong: 0 };
+                } else {                                      // sai hoặc bỏ qua: về hộp 1, ôn lại ngay
+                    srs[key] = { q, box: 1, due: now, wrong: (card?.wrong || 0) + 1 };
+                }
+            });
+
+            saveSRS(srs);
+        }
+
+        function buildReviewRound() {
+            const srs = loadSRS();
+            const now = Date.now();
+            const byKey = new Map(allQuestions.map(q => [qKey(q), q]));
+
+            const due = Object.entries(srs)
+                .filter(([, c]) => c.due <= now)
+                .sort((a, b) => a[1].box - b[1].box || b[1].wrong - a[1].wrong) // hộp thấp, sai nhiều → trước
+                .slice(0, QUESTIONS_PER_ROUND)
+                .map(([k, c]) => byKey.get(k) || c.q);      // ưu tiên bản mới nhất trong Sheet
+
+            return shuffleArray(due);
+        }
+
+        function updateReviewCard() {
+            const el = document.getElementById('reviewCount');
+            if (!el) return;
+            const cards = Object.values(loadSRS());
+            const due = cards.filter(c => c.due <= Date.now()).length;
+            el.textContent = cards.length === 0
+                ? 'Chưa có câu nào trong sổ tay'
+                : `${due} câu đến hạn ôn • ${cards.length} câu trong sổ tay`;
         }
 
         // ============================================================
@@ -1305,8 +1557,7 @@ QUAN TRỌNG: Chỉ trả về JSON object thuần túy, KHÔNG có backtick, KH
                 ((currentIndex) / currentRound.length) * 100 + '%';
 
             if (mode === 'timed') {
-                const seconds = Math.max(MIN_TIME, TIMED_START_SECONDS - currentIndex * TIMED_DECREMENT);
-                startTimer(seconds);
+                startTimer(timedSeconds);
             } else {
                 document.getElementById('timer').classList.add('hidden');
             }
@@ -1322,12 +1573,104 @@ QUAN TRỌNG: Chỉ trả về JSON object thuần túy, KHÔNG có backtick, KH
         }
 
         // ============================================================
+        // ⏱️ CHỌN THỜI GIAN MỖI CÂU (chế độ tính giờ)
+        // ============================================================
+        const TIMER_PREF_KEY = 'eng_practice_timer_v1';
+        const TIMER_PRESETS = [60, 40, 20];
+        let timerChoice = 60;        // 60 | 40 | 20 | 'custom'
+        let timerCustomValue = 30;
+
+        function openTimerModal() {
+            try {
+                const saved = JSON.parse(localStorage.getItem(TIMER_PREF_KEY));
+                if (saved && (TIMER_PRESETS.includes(saved.choice) || saved.choice === 'custom')) {
+                    timerChoice = saved.choice;
+                    if (Number.isFinite(saved.custom)) timerCustomValue = saved.custom;
+                }
+            } catch {}
+
+            const input = document.getElementById('timerCustomInput');
+            input.min = TIMER_CUSTOM_MIN;
+            input.max = TIMER_CUSTOM_MAX;
+            input.value = timerCustomValue;
+
+            renderTimerModal();
+            document.getElementById('timerModal').classList.add('open');
+        }
+
+        function closeTimerModal() {
+            document.getElementById('timerModal').classList.remove('open');
+        }
+
+        function chooseTimer(choice) {
+            timerChoice = choice;
+            renderTimerModal();
+            if (choice === 'custom') {
+                setTimeout(() => document.getElementById('timerCustomInput').select(), 50);
+            }
+        }
+
+        // Trả về số giây hợp lệ, hoặc null nếu ô "Tự chọn" nhập sai
+        function getChosenSeconds() {
+            if (timerChoice !== 'custom') return timerChoice;
+            const v = parseInt(document.getElementById('timerCustomInput').value, 10);
+            if (!Number.isFinite(v) || v < TIMER_CUSTOM_MIN || v > TIMER_CUSTOM_MAX) return null;
+            return v;
+        }
+
+        function formatDuration(totalSeconds) {
+            if (totalSeconds < 60) return totalSeconds + ' giây';
+            const m = Math.floor(totalSeconds / 60);
+            const s = totalSeconds % 60;
+            return m + ' phút' + (s ? ' ' + s + ' giây' : '');
+        }
+
+        function renderTimerModal() {
+            document.querySelectorAll('#timerModal .timer-option').forEach(btn => {
+                btn.classList.toggle('selected', btn.dataset.value === String(timerChoice));
+            });
+            document.getElementById('timerCustomRow').classList.toggle('show', timerChoice === 'custom');
+
+            const hint = document.getElementById('timerHint');
+            const secs = getChosenSeconds();
+            if (secs === null) {
+                hint.textContent = `Hãy nhập số giây từ ${TIMER_CUSTOM_MIN} đến ${TIMER_CUSTOM_MAX}`;
+                hint.classList.add('error');
+            } else {
+                const total = Math.max(1, Math.min(QUESTIONS_PER_ROUND, allQuestions.length));
+                hint.textContent = `Câu 1 → câu ${total}: mỗi câu ${secs} giây (tối đa ${formatDuration(secs * total)})`;
+                hint.classList.remove('error');
+            }
+        }
+
+        function startTimedFromModal() {
+            const secs = getChosenSeconds();
+            if (secs === null) {
+                renderTimerModal();
+                document.getElementById('timerCustomInput').focus();
+                return;
+            }
+            timedSeconds = secs;
+            if (timerChoice === 'custom') timerCustomValue = secs;
+            try {
+                localStorage.setItem(TIMER_PREF_KEY, JSON.stringify({ choice: timerChoice, custom: timerCustomValue }));
+            } catch {}
+            closeTimerModal();
+            startMode('timed');
+        }
+
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') closeTimerModal();
+        });
+
+        // ============================================================
         // TIMER
         // ============================================================
         function startTimer(seconds) {
             const timerEl = document.getElementById('timer');
             timerEl.classList.remove('hidden', 'warning', 'danger');
             timeLeft = seconds;
+            timeTotal = seconds;
             updateTimerDisplay();
 
             if (timerInterval) clearInterval(timerInterval);
@@ -1345,8 +1688,9 @@ QUAN TRỌNG: Chỉ trả về JSON object thuần túy, KHÔNG có backtick, KH
             const timerEl = document.getElementById('timer');
             timerEl.textContent = timeLeft + 's';
             timerEl.classList.remove('warning', 'danger');
-            if (timeLeft <= 10) timerEl.classList.add('danger');
-            else if (timeLeft <= 20) timerEl.classList.add('warning');
+            // Cảnh báo theo tỉ lệ thời gian còn lại → đúng với mọi mức 20s / 40s / 60s / tự chọn
+            if (timeLeft <= Math.max(5, timeTotal * 0.2)) timerEl.classList.add('danger');
+            else if (timeLeft <= timeTotal * 0.5) timerEl.classList.add('warning');
         }
 
         // ============================================================
@@ -1460,6 +1804,18 @@ QUAN TRỌNG: Chỉ trả về JSON object thuần túy, KHÔNG có backtick, KH
             const avgScore = Math.round(
                 evaluated.reduce((s, a) => s + getPercent(a), 0) / evaluated.length
             );
+
+            // 📒 Cập nhật sổ tay câu sai
+            recordResults(evaluated.map(a => ({
+                q: { chunk: a.chunk, vietnamese: a.vietnamese, english: a.correctEnglish },
+                verdict: getVerdict(a)
+            })));
+
+            // 📒 Cập nhật sổ tay câu sai
+            recordResults(evaluated.map(a => ({
+                q: { chunk: a.chunk, vietnamese: a.vietnamese, english: a.correctEnglish },
+                verdict: getVerdict(a)
+            })));
 
             const scorePrefix = aiError ? '⚠️ ' : (USE_AI_GRADING && !aiError ? '🤖 ' : '');
             scoreEl.textContent = `${scorePrefix}${correctCount} / ${evaluated.length} (${avgScore}%)`;
