@@ -607,6 +607,64 @@
         .timer-modal-actions .btn-primary { width: auto; flex: 2; }
         .btn-cancel { background: #eef0f7; color: #555; }
         .btn-cancel:hover { background: #e1e5f2; }
+
+        /* ===== Chế độ nghe chép & luyện nói ===== */
+        .dictation-box, .mic-box { display: none; }
+        #screen-practice[data-mode="dictation"] .chunk-box,
+        #screen-practice[data-mode="dictation"] .vn-box { display: none; }
+        #screen-practice[data-mode="dictation"] .dictation-box { display: block; }
+        #screen-practice[data-mode="speaking"] .mic-box { display: flex; }
+
+        .dictation-box {
+            background: #f0f4ff;
+            border: 2px dashed #667eea;
+            border-radius: 14px;
+            padding: 20px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .dictation-title { color: #667eea; font-weight: 700; font-size: 17px; margin-bottom: 14px; }
+        .dictation-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+        .dict-btn {
+            border: 2px solid #667eea;
+            background: white;
+            color: #667eea;
+            padding: 10px 16px;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 14px;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .dict-btn:hover { background: #667eea; color: white; }
+        .dict-hint {
+            display: none;
+            margin-top: 14px;
+            padding: 10px 14px;
+            background: white;
+            border-radius: 10px;
+            color: #555;
+            font-size: 15px;
+        }
+        .dict-hint.show { display: block; }
+
+        .mic-box { align-items: center; gap: 14px; margin-bottom: 14px; }
+        .mic-btn {
+            width: 56px;
+            height: 56px;
+            flex-shrink: 0;
+            border: none;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            font-size: 26px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .mic-btn:hover { transform: scale(1.08); }
+        .mic-btn.listening { background: #d32f2f; animation: pulse 1s infinite; }
+        .mic-status { color: #666; font-size: 14px; text-align: left; }
     </style>
 </head>
 <body>
@@ -658,6 +716,14 @@
                 <div class="mode-card" onclick="openTimerModal()">
                     <h3>⏱️ Chế độ tính giờ</h3>
                     <p>Chọn thời gian mỗi câu: 60s, 40s, 20s hoặc tự chọn</p>
+                </div>
+                <div class="mode-card" onclick="startMode('dictation')">
+                    <h3>🎧 Nghe chép</h3>
+                    <p>Nghe câu tiếng Anh rồi gõ lại</p>
+                </div>
+                <div class="mode-card" onclick="startMode('speaking')">
+                    <h3>🎤 Luyện nói</h3>
+                    <p>Nhìn câu tiếng Việt, nói câu tiếng Anh vào micro</p>
                 </div>
                 <div class="mode-card" style="grid-column: 1 / -1;" onclick="startMode('review')">
                     <h3>📒 Ôn câu sai</h3>
@@ -776,6 +842,23 @@
                 <div class="vn-text" id="vnText"></div>
             </div>
 
+            <!-- Chế độ nghe chép -->
+            <div class="dictation-box">
+                <div class="dictation-title">🎧 Nghe và chép lại câu tiếng Anh</div>
+                <div class="dictation-actions">
+                    <button type="button" class="dict-btn" onclick="playDictation(false)">🔊 Nghe lại</button>
+                    <button type="button" class="dict-btn" onclick="playDictation(true)">🐢 Nghe chậm</button>
+                    <button type="button" class="dict-btn" onclick="toggleDictHint()">💡 Gợi ý nghĩa</button>
+                </div>
+                <div class="dict-hint" id="dictHint"></div>
+            </div>
+
+            <!-- Chế độ luyện nói -->
+            <div class="mic-box">
+                <button type="button" class="mic-btn" id="micBtn" onclick="toggleMic()" title="Bấm để nói">🎤</button>
+                <div class="mic-status" id="micStatus">Bấm 🎤 rồi nói câu tiếng Anh của bạn</div>
+            </div>
+
             <textarea id="userAnswer" placeholder="Viết câu trả lời tiếng Anh của bạn ở đây... (Enter để nộp)"></textarea>
 
             <button class="btn btn-primary" onclick="submitAnswer()">
@@ -859,13 +942,13 @@
                 || null;
         }
 
-        function speak(text, lang = 'en-US', btnEl = null) {
+        function speak(text, lang = 'en-US', btnEl = null, rate = 0.9) {
             if (!text || !text.trim()) return;
             stopAll();
             getVoicesReady().then(voices => {
                 const utter = new SpeechSynthesisUtterance(text);
                 utter.lang   = lang;
-                utter.rate   = 0.9;
+                utter.rate   = rate;
                 utter.pitch  = 1;
                 utter.volume = 1;
                 const voice = findVoice(voices, lang);
@@ -1254,6 +1337,7 @@ QUAN TRỌNG: Chỉ trả về JSON object thuần túy, KHÔNG có backtick, KH
         function showScreen(id) {
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
             document.getElementById(id).classList.add('active');
+            stopMic();
             if (id === 'screen-mode') updateReviewCard();
         }
 
@@ -1428,6 +1512,7 @@ QUAN TRỌNG: Chỉ trả về JSON object thuần túy, KHÔNG có backtick, KH
         // ============================================================
         function startMode(selectedMode) {
             mode = selectedMode;
+            document.getElementById('screen-practice').dataset.mode = selectedMode;
             if (selectedMode === 'review') {
                 currentRound = buildReviewRound();
                 if (currentRound.length === 0) {
@@ -1551,6 +1636,9 @@ QUAN TRỌNG: Chỉ trả về JSON object thuần túy, KHÔNG có backtick, KH
             document.getElementById('chunkText').textContent = q.chunk;
             document.getElementById('vnText').textContent = q.vietnamese;
             document.getElementById('userAnswer').value = '';
+            document.getElementById('dictHint').textContent = q.vietnamese;   // gợi ý của chế độ nghe chép
+            document.getElementById('dictHint').classList.remove('show');
+            stopMic();
             document.getElementById('questionCounter').textContent =
                 `Câu ${currentIndex + 1} / ${currentRound.length}`;
             document.getElementById('progressFill').style.width =
@@ -1565,11 +1653,115 @@ QUAN TRỌNG: Chỉ trả về JSON object thuần túy, KHÔNG có backtick, KH
             document.getElementById('userAnswer').focus();
 
             const autoSpeak = document.getElementById('autoSpeak').checked;
-            if (autoSpeak) {
+            if (mode === 'dictation') {
+                // Nghe chép: luôn tự đọc câu tiếng Anh
+                setTimeout(() => speak(q.english, 'en-US'), 300);
+            } else if (autoSpeak) {
                 setTimeout(() => {
                     speak(q.vietnamese, 'vi-VN');
                 }, 300);
             }
+        }
+
+        // ============================================================
+        // 🎧 NGHE CHÉP  &  🎤 LUYỆN NÓI
+        // ============================================================
+        let recognition = null;
+        let isListening = false;
+        let micHadError = false;
+        const MIC_DEFAULT_TEXT = 'Bấm 🎤 rồi nói câu tiếng Anh của bạn';
+
+        // Nghe chép không dùng AI (so khớp trực tiếp với câu gốc)
+        function aiEnabledForMode() {
+            return USE_AI_GRADING && mode !== 'dictation';
+        }
+
+        function playDictation(slow) {
+            const q = currentRound[currentIndex];
+            if (!q) return;
+            speak(q.english, 'en-US', null, slow ? 0.55 : 0.9);
+        }
+
+        function toggleDictHint() {
+            document.getElementById('dictHint').classList.toggle('show');
+        }
+
+        function stopMic() {
+            const r = recognition;
+            recognition = null;                 // vô hiệu hóa các sự kiện còn treo của lần nghe cũ
+            if (r) { try { r.abort(); } catch {} }
+            isListening = false;
+            micHadError = false;
+            const btn = document.getElementById('micBtn');
+            const status = document.getElementById('micStatus');
+            if (btn) btn.classList.remove('listening');
+            if (status) status.textContent = MIC_DEFAULT_TEXT;
+        }
+
+        function toggleMic() {
+            const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+            const btn = document.getElementById('micBtn');
+            const status = document.getElementById('micStatus');
+            const answerEl = document.getElementById('userAnswer');
+
+            if (!SR) {
+                status.textContent = '⚠️ Trình duyệt này chưa hỗ trợ nhận dạng giọng nói. Hãy dùng Chrome hoặc Edge, hoặc gõ câu trả lời.';
+                return;
+            }
+
+            if (isListening && recognition) {   // đang nghe → bấm lần nữa để dừng
+                recognition.stop();
+                return;
+            }
+
+            synth.cancel();                     // tắt tiếng đọc để micro không thu nhầm
+            if (recognition) { try { recognition.abort(); } catch {} }
+
+            const rec = new SR();
+            recognition = rec;
+            micHadError = false;
+            rec.lang = 'en-US';
+            rec.interimResults = true;
+            rec.continuous = false;
+            rec.maxAlternatives = 1;
+
+            rec.onstart = () => {
+                if (rec !== recognition) return;
+                isListening = true;
+                btn.classList.add('listening');
+                status.textContent = '🎙️ Đang nghe... hãy nói câu tiếng Anh (bấm lại để dừng)';
+            };
+            rec.onresult = (e) => {
+                if (rec !== recognition) return;
+                let text = '';
+                for (let i = 0; i < e.results.length; i++) text += e.results[i][0].transcript;
+                answerEl.value = text.trim();
+            };
+            rec.onerror = (e) => {
+                if (rec !== recognition) return;
+                micHadError = true;
+                const msgs = {
+                    'not-allowed': '🚫 Bạn chưa cho phép dùng micro. Hãy cấp quyền micro cho trang web này.',
+                    'service-not-allowed': '🚫 Trình duyệt không cho phép nhận dạng giọng nói trên trang này.',
+                    'no-speech': '🤔 Không nghe thấy giọng nói, hãy thử lại.',
+                    'audio-capture': '🎙️ Không tìm thấy micro.',
+                    'network': '🌐 Lỗi mạng khi nhận dạng giọng nói.'
+                };
+                status.textContent = msgs[e.error] || ('⚠️ Lỗi micro: ' + e.error);
+            };
+            rec.onend = () => {
+                if (rec !== recognition) return;
+                isListening = false;
+                btn.classList.remove('listening');
+                if (!micHadError) {
+                    status.textContent = answerEl.value
+                        ? '✅ Đã ghi nhận. Bạn có thể sửa lại chữ hoặc bấm nộp; bấm 🎤 để nói lại.'
+                        : MIC_DEFAULT_TEXT;
+                }
+            };
+
+            try { rec.start(); }
+            catch (err) { status.textContent = '⚠️ Không bật được micro: ' + err.message; }
         }
 
         // ============================================================
@@ -1740,7 +1932,7 @@ QUAN TRỌNG: Chỉ trả về JSON object thuần túy, KHÔNG có backtick, KH
             // ─── BƯỚC 2: Chấm bằng AI ───
             let aiError = null;
 
-            if (USE_AI_GRADING) {
+            if (aiEnabledForMode()) {
                 listEl.innerHTML = `
                     <div class="loading" style="padding: 40px 20px;">
                         <span class="spinner"></span>
@@ -1811,13 +2003,15 @@ QUAN TRỌNG: Chỉ trả về JSON object thuần túy, KHÔNG có backtick, KH
                 verdict: getVerdict(a)
             })));
 
-            // 📒 Cập nhật sổ tay câu sai
-            recordResults(evaluated.map(a => ({
-                q: { chunk: a.chunk, vietnamese: a.vietnamese, english: a.correctEnglish },
-                verdict: getVerdict(a)
-            })));
+            // 📒 Cập nhật sổ tay câu sai (nghe chép là bài nghe, không phải bài dịch nên không ghi)
+            if (mode !== 'dictation') {
+                recordResults(evaluated.map(a => ({
+                    q: { chunk: a.chunk, vietnamese: a.vietnamese, english: a.correctEnglish },
+                    verdict: getVerdict(a)
+                })));
+            }
 
-            const scorePrefix = aiError ? '⚠️ ' : (USE_AI_GRADING && !aiError ? '🤖 ' : '');
+            const scorePrefix = aiError ? '⚠️ ' : (aiEnabledForMode() && !aiError ? '🤖 ' : '');
             scoreEl.textContent = `${scorePrefix}${correctCount} / ${evaluated.length} (${avgScore}%)`;
 
             statsEl.innerHTML = `
